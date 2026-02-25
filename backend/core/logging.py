@@ -10,12 +10,12 @@ class JSONFormatter(logging.Formatter):
         payload = {
             "timestamp": datetime.utcfromtimestamp(record.created).isoformat() + "Z",
             "level": record.levelname,
-            "module": record.name,
+            "service_module": record.name,
             "request_id": getattr(record, "request_id", None),
             "message": record.getMessage(),
         }
         # include any extra keys that are JSON-serializable
-        extras = {k: v for k, v in record.__dict__.items() if k not in ("name", "msg", "args", "levelname", "levelno", "pathname", "filename", "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName", "created", "msecs", "relativeCreated", "thread", "threadName", "processName", "process")}
+        extras = {k: v for k, v in record.__dict__.items() if k not in ("name", "msg", "args", "levelname", "levelno", "pathname", "filename", "module", "service_module", "exc_info", "exc_text", "stack_info", "lineno", "funcName", "created", "msecs", "relativeCreated", "thread", "threadName", "processName", "process")}
         for k, v in extras.items():
             try:
                 json.dumps({k: v})
