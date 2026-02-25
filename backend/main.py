@@ -13,7 +13,7 @@ from services.ai import shutdown_service
 from core.middleware.request_id import RequestIDMiddleware
 
 # initialize basic logging for production readiness before app creation
-setup_logging(settings.LOG_LEVEL)
+setup_logging()
 
 app = FastAPI(title=settings.APP_NAME)
 

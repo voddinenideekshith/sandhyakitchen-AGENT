@@ -18,7 +18,7 @@ if env:
 
 
 class Settings(BaseSettings):
-    ENV: Literal["development", "staging", "production"] = Field(..., env="ENV")
+    ENV: str = Field("development", env="ENV")
     APP_NAME: str = Field("Sandhya Kitchen API", env="APP_NAME")
     API_V1_PREFIX: str = Field("/api/v1", env="API_V1_PREFIX")
 
