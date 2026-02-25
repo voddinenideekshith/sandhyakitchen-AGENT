@@ -16,6 +16,13 @@ from core.middleware.request_id import RequestIDMiddleware
 setup_logging()
 
 app = FastAPI(title=settings.APP_NAME)
+# Health check endpoint (Render + monitoring)
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "ok",
+        "service": "sandhya-kitchen-agent"
+    }
 
 app.add_middleware(
     CORSMiddleware,
