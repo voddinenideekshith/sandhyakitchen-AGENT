@@ -7,15 +7,17 @@ from core.request_id import get_request_id
 
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
+        # prefer explicit app_module set via logger.extra, fall back to record.name
+        app_module = getattr(record, "app_module", record.name)
         payload = {
             "timestamp": datetime.utcfromtimestamp(record.created).isoformat() + "Z",
             "level": record.levelname,
-            "service_module": record.name,
+            "app_module": app_module,
             "request_id": getattr(record, "request_id", None),
             "message": record.getMessage(),
         }
         # include any extra keys that are JSON-serializable
-        extras = {k: v for k, v in record.__dict__.items() if k not in ("name", "msg", "args", "levelname", "levelno", "pathname", "filename", "module", "service_module", "exc_info", "exc_text", "stack_info", "lineno", "funcName", "created", "msecs", "relativeCreated", "thread", "threadName", "processName", "process")}
+        extras = {k: v for k, v in record.__dict__.items() if k not in ("name", "msg", "args", "levelname", "levelno", "pathname", "filename", "module", "app_module", "exc_info", "exc_text", "stack_info", "lineno", "funcName", "created", "msecs", "relativeCreated", "thread", "threadName", "processName", "process")}
         for k, v in extras.items():
             try:
                 json.dumps({k: v})

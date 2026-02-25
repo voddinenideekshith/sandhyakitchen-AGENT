@@ -30,7 +30,7 @@ async def generate_response(request: AIRequest) -> AIResponse:
     max_retries = 2
     base_backoff = 0.5
 
-    logger.info("ai_request_start", extra={"service_module": __name__, "provider": adapter.provider, "model": adapter.model})
+    logger.info("ai_request_start", extra={"app_module": __name__, "provider": adapter.provider, "model": adapter.model})
 
     for attempt in range(0, max_retries + 1):
         try:
