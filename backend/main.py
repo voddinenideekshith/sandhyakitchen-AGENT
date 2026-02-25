@@ -71,3 +71,6 @@ app.include_router(admin_menu.router, prefix="/admin/menu", tags=["admin_menu"])
 app.include_router(auth_routes.router, prefix="/auth", tags=["auth"])
 app.include_router(admin_orders.router, prefix="/admin/orders", tags=["admin_orders"])
 app.include_router(ai_routes.router, prefix="/ai", tags=["ai"])
+@app.get("/")
+def root():
+    return {"status": "Sandhya Kitchen API is running"}
