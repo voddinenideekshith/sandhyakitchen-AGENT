@@ -65,3 +65,38 @@ export async function sendMessage(message: string): Promise<AIResponse> {
   const data = (await res.json()) as AIResponse
   return data
 }
+
+/**
+ * Stream message via fetch and return the Response for streaming read.
+ */
+export async function streamMessage(message: string): Promise<Response> {
+  const base = process.env.NEXT_PUBLIC_API_URL
+  if (!base) throw new Error('NEXT_PUBLIC_API_URL is not configured')
+
+  const url = `${base.replace(/\/$/, '')}/ai/test`
+
+  const context = {
+    session_id: getSessionId(),
+    timestamp: new Date().toISOString(),
+    platform: 'web' as const,
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, context }),
+  })
+
+  if (!res.ok) {
+    let text = res.statusText || 'Network error'
+    try {
+      const json = await res.json()
+      text = json?.detail || json || text
+    } catch (e) {
+      /* ignore */
+    }
+    throw new Error(String(text))
+  }
+
+  return res
+}

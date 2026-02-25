@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useRef, useState } from 'react'
-import { sendMessage, getSessionId } from '../lib/api'
+import { streamMessage, getSessionId } from '../lib/api'
 import TypingIndicator from './TypingIndicator'
 
 type Message = {
@@ -39,13 +39,78 @@ export default function AIChat() {
     setLoading(true)
 
     try {
-      const res = await sendMessage(content)
-      const assistantMsg: Message = { role: 'assistant', content: res.reply || 'No reply' }
-      setMessages((m) => [...m, assistantMsg])
+        // start streaming response
+        // append empty assistant message placeholder
+        setMessages((m) => [...m, { role: 'assistant', content: '' }])
+        const res = await streamMessage(content)
+
+        if (!res.body) {
+          throw new Error('No response body')
+        }
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk = decoder.decode(value, { stream: true })
+          buffer += chunk
+
+          // process SSE events separated by double newline
+          let idx
+          while ((idx = buffer.indexOf('\n\n')) !== -1) {
+            const event = buffer.slice(0, idx)
+            buffer = buffer.slice(idx + 2)
+            // extract data lines
+            const lines = event.split(/\r?\n/)
+            let data = ''
+            for (const line of lines) {
+              if (line.startsWith('data:')) {
+                data += line.replace(/^data:\s?/, '')
+              }
+            }
+            if (!data) continue
+            if (data === '[ERROR]') {
+              // replace last assistant message with error
+              setMessages((prev) => {
+                const next = [...prev]
+                const last = next.pop()
+                if (last) next.push({ role: 'assistant', content: '⚠️ AI service temporarily unavailable' })
+                return next
+              })
+              // stop reading
+              await reader.cancel()
+              throw new Error('AI service error')
+            }
+            if (data === '[DONE]') {
+              // stream finished marker, ignore
+              continue
+            }
+            // append chunk to last assistant message
+            setMessages((prev) => {
+              const next = [...prev]
+              const last = next.pop()
+              const appended = last ? { ...last, content: (last.content || '') + data } : { role: 'assistant', content: data }
+              next.push(appended)
+              return next
+            })
+          }
+        }
     } catch (err) {
       const msg = (err as Error)?.message || 'AI service temporarily unavailable'
-      const assistantMsg: Message = { role: 'assistant', content: '⚠️ AI service temporarily unavailable' }
-      setMessages((m) => [...m, assistantMsg])
+      // ensure error message is shown in assistant bubble
+      setMessages((prev) => {
+        const next = [...prev]
+        const last = next.pop()
+        if (last && last.role === 'assistant') {
+          next.push({ role: 'assistant', content: '⚠️ AI service temporarily unavailable' })
+        } else {
+          next.push({ role: 'assistant', content: '⚠️ AI service temporarily unavailable' })
+        }
+        return next
+      })
       console.error('AI request failed:', msg)
     } finally {
       setLoading(false)
@@ -98,6 +163,13 @@ export default function AIChat() {
                 }`}
               >
                 {m.content}
+                {/* blinking cursor for streaming assistant reply */}
+                {m.role === 'assistant' && loading && i === messages.length - 1 && (
+                  <span
+                    aria-hidden="true"
+                    className="inline-block w-0.5 h-5 bg-gray-600 ml-2 align-middle animate-pulse"
+                  />
+                )}
               </div>
             </div>
           ))}
