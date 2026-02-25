@@ -6,150 +6,149 @@ import time
 from urllib.parse import urljoin, urlparse
 from core.request_context import get_request_id
 
-
 logger = logging.getLogger(__name__)
 
 
 class AIAdapter:
-    """Provider adapter — encapsulates provider initialization and a single send_prompt API.
-
-    Current implementation supports 'openai' via direct HTTP calls using `httpx`.
-    The adapter reads configuration from environment variables so it is safe
-    for production (no hardcoded keys).
-    """
-
     def __init__(self) -> None:
         self.provider = (settings.AI_PROVIDER or "openai").lower()
         self.model = settings.AI_MODEL
 
         if self.provider == "openai":
-            key = settings.OPENAI_API_KEY
-            if not key:
-                raise RuntimeError("OPENAI_API_KEY is required when AI_PROVIDER=openai")
-            self.api_key = key
-            self.base_url = str(settings.OPENAI_API_BASE) if settings.OPENAI_API_BASE else "https://api.openai.com"
-            # create client with event hooks to propagate request_id and measure latency
-            event_hooks = {
+            self._init_openai()
+
+        elif self.provider == "gemini":
+            self._init_gemini()
+
+        else:
+            raise NotImplementedError(
+                f"AI provider '{self.provider}' not supported"
+            )
+
+    # ---------------------------------------------------
+    # OPENAI INIT
+    # ---------------------------------------------------
+    def _init_openai(self):
+        if not settings.OPENAI_API_KEY:
+            raise RuntimeError("OPENAI_API_KEY missing")
+
+        self.api_key = settings.OPENAI_API_KEY
+        self.base_url = (
+            str(settings.OPENAI_API_BASE)
+            if settings.OPENAI_API_BASE
+            else "https://api.openai.com"
+        )
+
+        self.client = httpx.AsyncClient(
+            base_url=self.base_url,
+            event_hooks={
                 "request": [self._on_request],
                 "response": [self._on_response],
-            }
-            # reuse a single AsyncClient instance for the adapter lifetime
-            self.client = httpx.AsyncClient(base_url=self.base_url, event_hooks=event_hooks)
-        else:
-            raise NotImplementedError(f"AI provider '{self.provider}' is not implemented")
+            },
+        )
 
-    async def send_prompt(self, prompt: str, timeout: Optional[float] = 15.0) -> Dict[str, Any]:
-        """Send the prompt to the configured provider and normalize the response.
+    # ---------------------------------------------------
+    # GEMINI INIT
+    # ---------------------------------------------------
+    def _init_gemini(self):
+        import google.generativeai as genai
 
-        Returns a dict with keys: 'reply' and optional 'tokens_used'.
-        """
+        if not settings.GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY missing")
+
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        self.gemini = genai.GenerativeModel(self.model)
+
+    # ---------------------------------------------------
+    # SEND PROMPT
+    # ---------------------------------------------------
+    async def send_prompt(
+        self, prompt: str, timeout: Optional[float] = 15.0
+    ) -> Dict[str, Any]:
+
         if self.provider == "openai":
-            # Use Chat Completions for broader model compatibility; payload is safe and simple
-            url = "/v1/chat/completions"
-            payload = {
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.2,
-                "max_tokens": 1024,
-            }
-            headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-            logger.info("sending prompt to ai provider", extra={"provider": self.provider, "model": self.model})
-            # prepare full url for safe logging
-            full_url = urljoin(self.base_url, url)
-            start = time.time()
-            try:
-                resp = await self.client.post(url, json=payload, headers=headers, timeout=timeout)
-                resp.raise_for_status()
-                data = resp.json()
-                # compute latency: prefer response.request.extensions if set by hook
-                try:
-                    req_start = resp.request.extensions.get("start_time")
-                    latency_ms = int((time.time() - req_start) * 1000) if req_start else int((time.time() - start) * 1000)
-                except Exception:
-                    latency_ms = int((time.time() - start) * 1000)
-                safe_url = _safe_url(full_url)
-                logger.info("ai_http_request_success", extra={
-                    "method": "POST",
-                    "url": safe_url,
-                    "latency_ms": latency_ms,
-                    "status_code": resp.status_code,
-                })
-            except Exception as e:
-                # attempt to extract latency if possible
-                try:
-                    latency_ms = int((time.time() - start) * 1000)
-                except Exception:
-                    latency_ms = None
-                safe_url = _safe_url(full_url)
-                logger.error("ai_http_request_error", extra={
-                    "method": "POST",
-                    "url": safe_url,
-                    "latency_ms": latency_ms,
-                    "error": str(e),
-                })
-                raise
+            return await self._openai_prompt(prompt, timeout)
 
-            # Normalize: support both chat completions and response-like shapes
-            try:
-                choice = data["choices"][0]
-                # Chat completion shape
-                text = choice.get("message", {}).get("content") or choice.get("text")
-            except Exception:
-                text = None
+        if self.provider == "gemini":
+            return await self._gemini_prompt(prompt)
 
-            if text is None:
-                # Try Responses API shape
-                text = data.get("output", "")
+        raise NotImplementedError()
 
-            tokens = None
-            if isinstance(data.get("usage"), dict):
-                tokens = data["usage"].get("total_tokens") or data["usage"].get("prompt_tokens")
+    # ---------------------------------------------------
+    # OPENAI REQUEST
+    # ---------------------------------------------------
+    async def _openai_prompt(self, prompt, timeout):
+        url = "/v1/chat/completions"
 
-            return {"reply": text or "", "tokens_used": tokens}
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+        }
 
-        raise NotImplementedError("Provider not implemented")
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
 
-    async def close(self) -> None:
-        try:
+        start = time.time()
+
+        resp = await self.client.post(
+            url, json=payload, headers=headers, timeout=timeout
+        )
+        resp.raise_for_status()
+
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"]
+
+        latency = int((time.time() - start) * 1000)
+
+        logger.info(
+            "ai_openai_success",
+            extra={"latency_ms": latency, "provider": "openai"},
+        )
+
+        return {"reply": text, "tokens_used": None}
+
+    # ---------------------------------------------------
+    # GEMINI REQUEST
+    # ---------------------------------------------------
+    async def _gemini_prompt(self, prompt):
+        response = self.gemini.generate_content(prompt)
+
+        logger.info(
+            "ai_gemini_success",
+            extra={"provider": "gemini"},
+        )
+
+        return {"reply": response.text, "tokens_used": None}
+
+    # ---------------------------------------------------
+    async def close(self):
+        if hasattr(self, "client"):
             await self.client.aclose()
-            logger.info("ai adapter httpx client closed", extra={"provider": self.provider})
-        except Exception:
-            logger.exception("error closing httpx client")
 
-    async def _on_request(self, request: httpx.Request) -> None:
-        """Event hook: runs before each outgoing request.
-
-        Propagates X-Request-ID header from contextvar and stores start_time in request.extensions.
-        """
-        try:
-            rid = get_request_id()
-            if rid:
-                # do not override if already present
-                if "X-Request-ID" not in request.headers:
-                    request.headers["X-Request-ID"] = rid
-        except Exception:
-            rid = None
-        # record start time for latency measurement
+    # ---------------------------------------------------
+    async def _on_request(self, request: httpx.Request):
+        rid = get_request_id()
+        if rid:
+            request.headers["X-Request-ID"] = rid
         request.extensions["start_time"] = time.time()
-        safe_url = _safe_url(str(request.url))
-        logger.info("ai_http_request_start", extra={"method": request.method, "url": safe_url})
 
-    async def _on_response(self, response: httpx.Response) -> None:
-        """Event hook: runs after each response is received (before returning to caller)."""
-        req = response.request
-        start = req.extensions.get("start_time")
-        latency_ms = int((time.time() - start) * 1000) if start else None
-        safe_url = _safe_url(str(req.url))
-        logger.info("ai_http_request_success", extra={
-            "method": req.method,
-            "url": safe_url,
-            "latency_ms": latency_ms,
-            "status_code": response.status_code,
-        })
+    async def _on_response(self, response: httpx.Response):
+        start = response.request.extensions.get("start_time")
+        latency = int((time.time() - start) * 1000) if start else None
+
+        logger.info(
+            "ai_http_response",
+            extra={
+                "status_code": response.status_code,
+                "latency_ms": latency,
+            },
+        )
 
 
 def _safe_url(full_url: str) -> str:
-    """Return a URL without querystring or userinfo to avoid leaking secrets."""
     try:
         p = urlparse(full_url)
         return f"{p.scheme}://{p.netloc}{p.path}"
