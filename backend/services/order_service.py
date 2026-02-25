@@ -1,3 +1,5 @@
+from core.config import settings
+print("OPENAI KEY EXISTS:", bool(settings.OPENAI_API_KEY))
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from models.schemas import OrderCreate
