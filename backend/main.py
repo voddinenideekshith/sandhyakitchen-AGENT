@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
+from core.logging import setup_logging, configure_logging
 from routes import brands, menu, orders, admin_menu, auth as auth_routes, admin_orders, ai as ai_routes
 from database import init_db, SessionLocal
 from sqlalchemy import select
@@ -10,6 +11,9 @@ from core.logging import configure_logging
 import logging
 from services.ai import shutdown_service
 from core.middleware.request_id import RequestIDMiddleware
+
+# initialize basic logging for production readiness before app creation
+setup_logging(settings.LOG_LEVEL)
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -73,6 +77,11 @@ app.include_router(admin_orders.router, prefix="/admin/orders", tags=["admin_ord
 app.include_router(ai_routes.router, prefix="/ai", tags=["ai"])
 
 
-@app.get("/")
+@app.get("/", tags=["health"])
 def health_check():
     return {"status": "Sandhya Kitchen API running"}
+
+
+@app.get("/health")
+def readiness():
+    return {"ok": True}
