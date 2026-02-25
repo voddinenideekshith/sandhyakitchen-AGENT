@@ -19,14 +19,14 @@ if env:
 
 class Settings(BaseSettings):
     ENV: Literal["development", "staging", "production"] = Field(..., env="ENV")
-    APP_NAME: str = Field(..., env="APP_NAME")
-    API_V1_PREFIX: str = Field(..., env="API_V1_PREFIX")
+    APP_NAME: str = Field("Sandhya Kitchen API", env="APP_NAME")
+    API_V1_PREFIX: str = Field("/api/v1", env="API_V1_PREFIX")
 
     DATABASE_URL: PostgresDsn = Field(..., env="DATABASE_URL")
 
     JWT_SECRET_KEY: str = Field(..., env="JWT_SECRET_KEY")
     JWT_ALGORITHM: str = Field("HS256", env="JWT_ALGORITHM")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(..., env="ACCESS_TOKEN_EXPIRE_MINUTES")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(60, env="ACCESS_TOKEN_EXPIRE_MINUTES")
 
     OPENAI_API_KEY: Optional[str] = Field(None, env="OPENAI_API_KEY")
     OPENAI_API_BASE: Optional[AnyUrl] = Field(None, env="OPENAI_API_BASE")
@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+
+    # Pydantic v2 settings for BaseSettings
+    model_config = {
+        "env_file": ".env",
+        "extra": "ignore",
+    }
 
     @validator("ALLOWED_ORIGINS", pre=True)
     def _parse_allowed_origins(cls, v):
